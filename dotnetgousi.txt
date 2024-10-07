@@ -1,0 +1,165 @@
+using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+
+public class BusinessDayChecker
+{
+    public static string MarketPlaceParam = "MarketPlace";
+    public static string BusinessDayParam = "Schedule";
+
+    // List of valid day indicators
+    private static readonly List<string> ValidDayIndicators = new List<string> { "EOM", "SOM", "SOW", "EOW" };
+
+    // Regular expression for matching valid business day indicators with optional adjustments (e.g., EOM-1)
+    private static readonly Regex BusinessDayRegex = new Regex(@"^(EOM|SOM|SOW|EOW)([-+]?\d+)?$", RegexOptions.IgnoreCase);
+
+    // Method to validate and handle the marketPlace and schedule
+    public static bool IsMatching(IDictionary<string, string> parameters, DateTime runDate, out string message)
+    {
+        message = string.Empty;
+
+        // Get marketPlace and schedule (business day indicator) from the parameters
+        var marketPlace = parameters.GetStringParameter(MarketPlaceParam);
+        var schedule = parameters.GetStringParameter(BusinessDayParam);
+
+        // If either marketPlace or schedule is blank/empty, return true
+        if (string.IsNullOrEmpty(marketPlace) || string.IsNullOrEmpty(schedule))
+        {
+            return true;
+        }
+
+        // Validate if the marketPlace is available/valid
+        if (IsValidMarketPlace(marketPlace))
+        {
+            // Validate if the schedule is a valid business day indicator
+            if (IsValidBusinessDayIndicator(schedule, out string baseIndicator, out int adjustment))
+            {
+                XOneDate calculatedDate = null;
+
+                // Process based on the business day indicator
+                if (baseIndicator.ToUpper() == "EOM")
+                {
+                    calculatedDate = XOneDate.LastBusinessDayOfMonth(runDate, marketPlace);
+
+                    // Adjust for the specified number of business days
+                    if (adjustment != 0)
+                    {
+                        calculatedDate = AdjustBusinessDays(calculatedDate, marketPlace, adjustment);
+                    }
+                }
+                else if (baseIndicator.ToUpper() == "SOM")
+                {
+                    calculatedDate = XOneDate.FirstBusinessDayOfMonth(runDate, marketPlace);
+
+                    // Adjust for the specified number of business days
+                    if (adjustment != 0)
+                    {
+                        calculatedDate = AdjustBusinessDays(calculatedDate, marketPlace, adjustment);
+                    }
+                }
+                // Implement similar logic for other indicators like SOW, EOW, etc. as needed
+
+                // Final adjustment for holidays
+                if (calculatedDate != null)
+                {
+                    calculatedDate = AdjustForHoliday(calculatedDate, marketPlace);
+                    message = $"Calculated business day: {calculatedDate}";
+                    return true;
+                }
+            }
+            else
+            {
+                message = "Invalid business day indicator.";
+                return false;
+            }
+        }
+        else
+        {
+            message = "MarketPlace is invalid.";
+            return false;
+        }
+    }
+
+    // Method to adjust for holidays (move to the previous business day if it's a holiday)
+    private static XOneDate AdjustForHoliday(XOneDate date, string marketPlace)
+    {
+        // Loop until we find a valid business day (not a holiday)
+        while (IsHoliday(date, marketPlace))
+        {
+            // Move to the previous business day
+            date = date.AddDays(-1);
+        }
+        return date;
+    }
+
+    // Method to adjust the business days based on the given adjustment (e.g., -3 or +2)
+    private static XOneDate AdjustBusinessDays(XOneDate date, string marketPlace, int adjustment)
+    {
+        while (adjustment != 0)
+        {
+            if (adjustment > 0)
+            {
+                // Move forward by one day and check if it's a business day
+                date = date.AddDays(1);
+                if (IsBusinessDay(date, marketPlace)) adjustment--;
+            }
+            else
+            {
+                // Move backward by one day and check if it's a business day
+                date = date.AddDays(-1);
+                if (IsBusinessDay(date, marketPlace)) adjustment++;
+            }
+        }
+        return date;
+    }
+
+    // Check if a day is a holiday (non-business day)
+    public static bool IsHoliday(XOneDate date, string marketPlace)
+    {
+        var calendar = new Sgcib.TOne.StaticData.Calendar(new[] { marketPlace });
+
+        // Check if it's a holiday or weekend (Saturday or Sunday)
+        if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+        {
+            return true; // Weekend is not a business day
+        }
+
+        return !calendar.IsBusinessDay(date); // Check if it's a holiday
+    }
+
+    // Check if a day is a business day
+    public static bool IsBusinessDay(XOneDate date, string marketPlace)
+    {
+        var calendar = new Sgcib.TOne.StaticData.Calendar(new[] { marketPlace });
+        return calendar.IsBusinessDay(date);
+    }
+
+    // Validate if the business day indicator is valid and extract its parts
+    private static bool IsValidBusinessDayIndicator(string schedule, out string baseIndicator, out int adjustment)
+    {
+        baseIndicator = null;
+        adjustment = 0;
+
+        var match = BusinessDayRegex.Match(schedule);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        // Capture the base indicator (EOM, SOM, etc.)
+        baseIndicator = match.Groups[1].Value.ToUpper();
+
+        // Capture the adjustment (e.g., -3, +2), if any
+        var adjustmentValue = match.Groups[2].Value;
+        adjustment = string.IsNullOrEmpty(adjustmentValue) ? 0 : int.Parse(adjustmentValue);
+
+        return true;
+    }
+
+    // Placeholder method for validating the marketPlace (implement as needed)
+    private static bool IsValidMarketPlace(string marketPlace)
+    {
+        // Add logic to validate if the marketPlace exists and is valid
+        return true;
+    }
+}
