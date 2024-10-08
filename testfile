@@ -1,0 +1,232 @@
+using NUnit.Framework;
+using Sgcib.TOne.Products.OnewayMonitoring.Scheduler;
+using Sgcib.TOne.StaticData;
+using Sgcib.TOne.Util;
+using System.Collections.Generic;
+
+namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
+{
+    [TestFixture]
+    public class ScheduleHelperTests
+    {
+        private IDictionary<string, string> parameters;
+        private XOneDate runDate;
+
+        [SetUp]
+        public void SetUp()
+        {
+            // Initialize basic setup for each test
+            parameters = new Dictionary<string, string>();
+            runDate = new XOneDate(2024, 10, 01); // Example run date for the tests
+        }
+
+        [TestCase("", "NY", true, "")]
+        [TestCase("INVALID_MARKET", "EOM", false, "MarketPlace is invalid.")]
+        [TestCase("NY", "INVALID_INDICATOR", false, "Invalid business day indicator.")]
+        [TestCase("NY", "EOM", true, "")]
+        public void IsMatching_ShouldWorkCorrectly_WithDifferentInputs(string marketPlace, string businessDayIndicator, bool expectedResult, string expectedMessage)
+        {
+            // Arrange
+            parameters[ScheduleHelper.MarketPlaceParam] = marketPlace;
+            parameters[ScheduleHelper.BusinessDayParam] = businessDayIndicator;
+            string message;
+
+            // Act
+            var result = ScheduleHelper.IsMatching(parameters, runDate, out message);
+
+            // Assert
+            Assert.AreEqual(expectedResult, result);
+            Assert.AreEqual(expectedMessage, message);
+        }
+
+        [TestCase(2024, 10, 1, 2024, 10, 31)] // October, no holidays, last day is 31st
+        [TestCase(2024, 2, 1, 2024, 2, 29)]  // Leap year February, last day is 29th
+        public void LastBusinessDayOfMonth_ShouldReturnCorrectDate(int year, int month, int day, int expectedYear, int expectedMonth, int expectedDay)
+        {
+            // Arrange
+            var date = new XOneDate(year, month, day);
+            var expectedDate = new XOneDate(expectedYear, expectedMonth, expectedDay);
+
+            // Act
+            var result = ScheduleHelper.LastBusinessDayOfMonth(date, "NY");
+
+            // Assert
+            Assert.AreEqual(expectedDate, result);
+        }
+
+        [TestCase(2024, 10, 1, 2024, 10, 1)] // October 1st, no holidays
+        [TestCase(2024, 2, 1, 2024, 2, 1)]  // February 1st, no holidays
+        public void FirstBusinessDayOfMonth_ShouldReturnCorrectDate(int year, int month, int day, int expectedYear, int expectedMonth, int expectedDay)
+        {
+            // Arrange
+            var date = new XOneDate(year, month, day);
+            var expectedDate = new XOneDate(expectedYear, expectedMonth, expectedDay);
+
+            // Act
+            var result = ScheduleHelper.FirstBusinessDayOfMonth(date, "NY");
+
+            // Assert
+            Assert.AreEqual(expectedDate, result);
+        }
+
+        [TestCase(2024, 10, 1, -2, 2024, 9, 29)] // Adjusting by -2 days
+        [TestCase(2024, 10, 1, 2, 2024, 10, 3)]  // Adjusting by +2 days
+        public void AdjustBusinessDays_ShouldReturnAdjustedDate(int year, int month, int day, int adjustment, int expectedYear, int expectedMonth, int expectedDay)
+        {
+            // Arrange
+            var date = new XOneDate(year, month, day);
+            var expectedDate = new XOneDate(expectedYear, expectedMonth, expectedDay);
+
+            // Act
+            var result = ScheduleHelper.AdjustBusinessDays(date, "NY", adjustment);
+
+            // Assert
+            Assert.AreEqual(expectedDate, result);
+        }
+    }
+}
+
+
+
+
+
+
+
+
+using System;
+using System.Collections.Generic;
+using NUnit.Framework;
+using Sgcib.TOne.Products.OnewayMonitoring.Scheduler;
+using Sgcib.TOne.StaticData;
+using Sgcib.TOne.Util;
+
+namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
+{
+    [TestFixture]
+    public class ScheduleHelperTests
+    {
+        [TestCase("EOM", 20240131, "NY", 20240131, true)]
+        [TestCase("EOM", 20240228, "NY", 20240228, true)]
+        [TestCase("SOM", 20240101, "NY", 20240101, true)]
+        [TestCase("SOM+1", 20240101, "NY", 20240102, true)]
+        [TestCase("EOM-2", 20240131, "NY", 20240129, true)]
+        [TestCase("SOM", 20240201, "NY", 20240201, true)]
+        [TestCase("EOM+2", 20240131, "NY", 20240202, false)] // Adjusted out of month boundary
+        public void IsMatching_ValidSchedule_ReturnsCorrectMatching(
+            string businessDayIndicator, 
+            int runDate, 
+            string marketPlace, 
+            int expectedDate, 
+            bool expectedResult)
+        {
+            // Arrange
+            var parameters = new Dictionary<string, string>
+            {
+                { ScheduleHelper.MarketPlaceParam, marketPlace },
+                { ScheduleHelper.BusinessDayParam, businessDayIndicator }
+            };
+            var runDateObj = new XOneDate(DateTime.ParseExact(runDate.ToString(), "yyyyMMdd", null));
+            string message;
+
+            // Act
+            bool result = ScheduleHelper.IsMatching(parameters, runDateObj, out message);
+
+            // Assert
+            Assert.That(result, Is.EqualTo(expectedResult));
+            if (expectedResult)
+            {
+                Assert.That(message, Is.Empty);
+            }
+            else
+            {
+                Assert.That(message, Is.Not.Empty);
+            }
+        }
+
+        [TestCase(20240131, "NY", 20240131)]
+        [TestCase(20240228, "NY", 20240228)]
+        [TestCase(20240228, "DEFAULT", 20240228)]
+        [TestCase(20240131, "DEFAULT", 20240131)]
+        public void LastBusinessDayOfMonth_ReturnsCorrectDate(int date, string marketPlace, int expectedDate)
+        {
+            // Arrange
+            var xDate = new XOneDate(DateTime.ParseExact(date.ToString(), "yyyyMMdd", null));
+
+            // Act
+            var result = ScheduleHelper.LastBusinessDayOfMonth(xDate, marketPlace);
+
+            // Assert
+            Assert.That(result.ToString("yyyyMMdd"), Is.EqualTo(expectedDate.ToString()));
+        }
+
+        [TestCase(20240101, "NY", 20240101)]
+        [TestCase(20240102, "NY", 20240102)]
+        [TestCase(20240102, "DEFAULT", 20240102)]
+        public void FirstBusinessDayOfMonth_ReturnsCorrectDate(int date, string marketPlace, int expectedDate)
+        {
+            // Arrange
+            var xDate = new XOneDate(DateTime.ParseExact(date.ToString(), "yyyyMMdd", null));
+
+            // Act
+            var result = ScheduleHelper.FirstBusinessDayOfMonth(xDate, marketPlace);
+
+            // Assert
+            Assert.That(result.ToString("yyyyMMdd"), Is.EqualTo(expectedDate.ToString()));
+        }
+
+        [TestCase(20240131, "NY", -2, 20240129)]
+        [TestCase(20240101, "NY", 1, 20240102)]
+        [TestCase(20240131, "DEFAULT", -1, 20240130)]
+        public void AdjustBusinessDays_ReturnsCorrectAdjustedDate(int date, string marketPlace, int adjustment, int expectedDate)
+        {
+            // Arrange
+            var xDate = new XOneDate(DateTime.ParseExact(date.ToString(), "yyyyMMdd", null));
+
+            // Act
+            var result = ScheduleHelper.AdjustBusinessDays(xDate, marketPlace, adjustment);
+
+            // Assert
+            Assert.That(result.ToString("yyyyMMdd"), Is.EqualTo(expectedDate.ToString()));
+        }
+
+        [TestCase(20240131, "NY", true)]
+        [TestCase(20240101, "NY", true)]  // New Year's Day
+        [TestCase(20240228, "NY", false)] // Normal working day
+        public void IsHoliday_ReturnsCorrectResult(int date, string marketPlace, bool expectedHoliday)
+        {
+            // Arrange
+            var xDate = new XOneDate(DateTime.ParseExact(date.ToString(), "yyyyMMdd", null));
+
+            // Act
+            bool isHoliday = ScheduleHelper.IsHoliday(xDate, marketPlace);
+
+            // Assert
+            Assert.That(isHoliday, Is.EqualTo(expectedHoliday));
+        }
+
+        [TestCase("EOM+2", true)]
+        [TestCase("SOM-1", true)]
+        [TestCase("EOW+3", false)]  // Invalid indicator
+        [TestCase("XYZ", false)]    // Invalid format
+        public void IsValidBusinessDayIndicator_ReturnsCorrectValidation(string indicator, bool expectedValid)
+        {
+            // Act
+            var result = ScheduleHelper.IsValidBusinessDayIndicator(indicator, out string baseIndicator, out int adjustment);
+
+            // Assert
+            Assert.That(result, Is.EqualTo(expectedValid));
+        }
+
+        [TestCase("NY", true)]
+        [TestCase("DEFAULT", true)]
+        [TestCase("InvalidMarket", false)]
+        public void IsValidMarketPlace_ReturnsCorrectValidation(string marketPlace, bool expectedValid)
+        {
+            // Act
+            bool result = ScheduleHelper.IsValidMarketPlace(marketPlace);
+
+            // Assert
+            Assert.That(result, Is.EqualTo(expectedValid));
+        }
+    }
+}
