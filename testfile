@@ -275,34 +275,42 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
             Assert.IsEmpty(message);               // Assert no error message
         }
 
-
-
-[Test]
-        [TestCase("NYC", "EOM", 2024, 10, 9, true, "")] // Valid case
-        [TestCase("", "", 2024, 10, 9, true, "")] // Empty marketplace and schedule
-        [TestCase("InvalidMarketPlace", "EOM", 2024, 10, 9, false, "Invalid Market Place InvalidMarketPlace")] // Invalid market place
-        [TestCase("NYC", "InvalidSchedule", 2024, 10, 9, false, "Invalid Schedule InvalidSchedule")] // Invalid schedule
-        public void IsMatching_ParameterizedTests(string marketPlace, string schedule, int year, int month, int day, bool expectedResult, string expectedMessage)
+[TestCase("DEFAULT", "EOM", "2024-10-31", true, "")]
+        [TestCase("DEFAULT", "SOM", "2024-10-01", true, "")]
+        [TestCase("DEFAULT", "EOM-1", "2024-10-30", true, "")]
+        [TestCase("DEFAULT", "SOM+2", "2024-10-03", true, "")]
+        [TestCase("InvalidMarket", "EOM", "2024-10-31", false, "Invalid Market Place InvalidMarket")]
+        [TestCase("DEFAULT", "InvalidSchedule", "2024-10-31", false, "Invalid Schedule InvalidSchedule")]
+        public void IsMatching_ParameterizedTests(string marketPlace, string businessDayParam, string runDateString, bool expectedResult, string expectedMessage)
         {
             // Arrange
+            var runDate = new XOneDate(DateTime.Parse(runDateString));
             var parameters = new Dictionary<string, string>
             {
                 { "MarketPlace", marketPlace },
-                { "BusinessDay", schedule }
+                { "BusinessDay", businessDayParam }
             };
-            string message;
-            var runDate = new XOneDate(year, month, day); // Test date
 
-            // Mock calendar functionality as needed (if any)
-            if (marketPlace == "NYC")
-            {
-                // Setup any required behavior for valid marketPlace, or leave empty if unnecessary
-            }
+            string actualMessage;
+
+            // Mock the behavior for the calendar
+            _mockCalendar.Setup(c => c.AddBusinessDays(It.IsAny<int>(), It.IsAny<XOneDate>())).Returns<XOneDate, int>((date, adjustment) => date.AddDays(adjustment));
+
+            // Mock valid market place check
+            Mock.Get(CalendarProviderPlugin.Current)
+                .Setup(p => p.GetXOneCalendarForPlaces(It.Is<string[]>(m => m[0] == "DEFAULT")))
+                .Returns(_mockCalendar.Object);
+
+            Mock.Get(CalendarProviderPlugin.Current)
+                .Setup(p => p.GetXOneCalendarForPlaces(It.Is<string[]>(m => m[0] == "InvalidMarket")))
+                .Returns((IXOneCalendar)null);
 
             // Act
-            var result = ScheduleHelper.IsMatching(parameters, runDate, out message);
+            var result = ScheduleHelper.IsMatching(parameters, runDate, out actualMessage);
 
             // Assert
             Assert.AreEqual(expectedResult, result);
-            Assert.AreEqual(expectedMessage, message);
+            Assert.AreEqual(expectedMessage, actualMessage);
         }
+
+
