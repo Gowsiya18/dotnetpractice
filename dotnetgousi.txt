@@ -295,39 +295,57 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
             }
             return false;
         }
+public static XOneDate LastBusinessDayOfMonth(XOneDate date, string marketPlace)
+{
+    // Get the last day of the month
+    XOneDate lastDayOfMonth = new XOneDate(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month));
 
-        public static XOneDate LastBusinessDayOfMonth(XOneDate date, string marketPlace)
+    // If the marketplace is "DEFAULT", simply return the last day (no calendar adjustments)
+    if (marketPlace == "DEFAULT")
+    {
+        // Adjust for weekends if necessary
+        while (lastDayOfMonth.DayOfWeek == DayOfWeek.Saturday || lastDayOfMonth.DayOfWeek == DayOfWeek.Sunday)
         {
-            XOneDate lastDayOfMonth = new XOneDate(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month));
-            IXOneCalendar calendar = new Calendar(new[] { marketPlace });
-            while (IsHoliday(lastDayOfMonth, marketPlace))
-            {
-                lastDayOfMonth = lastDayOfMonth.AddDays(-1);
-            }
-            return lastDayOfMonth;
+            lastDayOfMonth = lastDayOfMonth.AddDays(-1);
         }
+        return lastDayOfMonth;
+    }
+
+    // Otherwise, for non-default marketplaces, adjust for holidays using the calendar
+    IXOneCalendar calendar = new Calendar(new[] { marketPlace });
+    while (IsHoliday(lastDayOfMonth, marketPlace))
+    {
+        lastDayOfMonth = lastDayOfMonth.AddDays(-1);
+    }
+
+    return lastDayOfMonth;
+}
 
         public static XOneDate FirstBusinessDayOfMonth(XOneDate date, string marketPlace)
-        {
-            XOneDate firstDayOfMonth = new XOneDate(date.Year, date.Month, 1);
-            IXOneCalendar calendar = new Calendar(new[] { marketPlace });
-            while (IsHoliday(firstDayOfMonth, marketPlace))
-            {
-                firstDayOfMonth = firstDayOfMonth.AddDays(1);
-            }
-            return firstDayOfMonth;
-        }
+{
+    // Get the first day of the month
+    XOneDate firstDayOfMonth = new XOneDate(date.Year, date.Month, 1);
 
-        public static XOneDate LastBusinessDayOfRegularMonth(XOneDate date)
+    // If the marketplace is "DEFAULT", adjust for weekends only
+    if (marketPlace == "DEFAULT")
+    {
+        while (firstDayOfMonth.DayOfWeek == DayOfWeek.Saturday || firstDayOfMonth.DayOfWeek == DayOfWeek.Sunday)
         {
-            int lastDay = DateTime.DaysInMonth(date.Year, date.Month);
-            return new XOneDate(date.Year, date.Month, lastDay);
+            firstDayOfMonth = firstDayOfMonth.AddDays(1);
         }
+        return firstDayOfMonth;
+    }
 
-        public static XOneDate FirstBusinessDayOfRegularMonth(XOneDate date)
-        {
-            return new XOneDate(date.Year, date.Month, 1);
-        }
+    // For non-default marketplaces, adjust based on the marketplace calendar
+    IXOneCalendar calendar = new Calendar(new[] { marketPlace });
+    while (!calendar.IsBusinessDay(firstDayOfMonth) || IsHoliday(firstDayOfMonth, marketPlace))
+    {
+        firstDayOfMonth = firstDayOfMonth.AddDays(1);
+    }
+
+    return firstDayOfMonth;
+}
+
 
         private static XOneDate AdjustBusinessDays(XOneDate date, string marketPlace, int adjustment)
         {
