@@ -1,0 +1,219 @@
+using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using Sgcib.TOne.StaticData;
+using Sgcib.TOne.Util;
+
+namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
+{
+    public class ScheduleHelper
+    {
+        private readonly string _thisName;
+        private const string MarketPlaceParam = "MarketPlace";
+        private const string BusinessDayParam = "BusinessDay";
+
+        private const string ValidDayIndicators = "EOM|SOM|SOW|EOW";
+
+        private static readonly Regex BusinessDayRegex = new Regex(string.Format(@"^({0})([+-]\d+)?$", ValidDayIndicators), RegexOptions.IgnoreCase);
+
+        public ScheduleHelper()
+        {
+            _thisName = GetType().Name;
+        }
+        public static bool IsMatching(IDictionary<string, string> parameters, XOneDate runDate, out string message)
+        {
+            message = string.Empty;
+            var calculatedDate = runDate;
+
+            try
+            {
+                var marketPlace = parameters.GetStringParameter(MarketPlaceParam);
+                var schedule = parameters.GetStringParameter(BusinessDayParam);
+
+                if (string.IsNullOrEmpty(marketPlace) || string.IsNullOrEmpty(schedule))
+                {
+                    return true;
+                }
+                if (!IsValidMarketPlace(marketPlace))
+                {
+                    message = $"Invalid Market Place {marketPlace}";
+                    return false;
+                }
+                if (!IsValidBusinessDayIndicator(schedule, out string baseIndicator, out int adjustment))
+                {
+                    message = $"Invalid Schedule {schedule}";
+                    return false;
+                }
+                calculatedDate = GetIndicator(runDate, marketPlace, baseIndicator, adjustment);
+            }
+            catch (Exception ex)
+            {
+                message = $"Error occurred while matching: {ex.Message}";
+            }
+
+            return runDate == calculatedDate;
+        }
+
+        public static XOneDate GetLastBusinessDayOfMonth(XOneDate date, string marketPlace)
+        {
+            var lastDayOfMonth = new XOneDate(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month));
+            if (marketPlace == "DEFAULT")
+            {
+                while (IsWeekEnd(lastDayOfMonth))
+                {
+                    lastDayOfMonth = lastDayOfMonth.AddDays(-1);
+                }
+                return lastDayOfMonth;
+            }
+            IXOneCalendar calendar = new Calendar(new[] { marketPlace });
+            while (!calendar.IsBusinessDay(lastDayOfMonth) || IsHoliday(lastDayOfMonth, marketPlace))
+            {
+                lastDayOfMonth = lastDayOfMonth.AddDays(-1);
+            }
+            return lastDayOfMonth;
+        }
+
+        public static XOneDate GetFirstBusinessDayOfMonth(XOneDate date, string marketPlace)
+        {
+            XOneDate firstDayOfMonth = new XOneDate(date.Year, date.Month, 1);
+            if (marketPlace == "DEFAULT")
+            {
+                while (IsWeekEnd(firstDayOfMonth))
+                {
+                    firstDayOfMonth = firstDayOfMonth.AddDays(1);
+                }
+                return firstDayOfMonth;
+            }
+            IXOneCalendar calendar = new Calendar(new[] { marketPlace });
+            while (!calendar.IsBusinessDay(firstDayOfMonth) || IsHoliday(firstDayOfMonth, marketPlace))
+            {
+                firstDayOfMonth = firstDayOfMonth.AddDays(1);
+            }
+            return firstDayOfMonth;
+
+        }
+
+        private static XOneDate AdjustBusinessDays(XOneDate date, string marketPlace, int adjustment)
+        {
+            try
+            {
+                while (adjustment != 0)
+                {
+                    if (adjustment > 0)
+                    {
+                        date = date.AddDays(1);
+                        if (IsBusinessDay(date, marketPlace) && !IsHoliday(date, marketPlace)) adjustment--;
+                    }
+                    else
+                    {
+                        date = date.AddDays(-1);
+                        if (IsBusinessDay(date, marketPlace) && !IsHoliday(date, marketPlace)) adjustment++;
+                    }
+                }
+                return date;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error adjusting business days: {ex.Message}");
+            }
+        }
+        public static bool IsBusinessDay(XOneDate date, string marketPlace)
+        {
+            try
+            {
+                var calendar = new Sgcib.TOne.StaticData.Calendar(new[] { marketPlace });
+                return calendar.IsBusinessDay(date);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error checking if {date} is a business day for {marketPlace}: {ex.Message}");
+            }
+        }
+        public static bool IsWeekEnd(XOneDate date)
+        {
+            return date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
+        }
+
+        public static bool IsValidBusinessDayIndicator(string schedule, out string baseIndicator, out int adjustment)
+        {
+            baseIndicator = null;
+            adjustment = 0;
+            try
+            {
+                var match = BusinessDayRegex.Match(schedule);
+                if (!match.Success)
+                {
+                    return false;
+                }
+
+                baseIndicator = match.Groups[1].Value.ToUpper();
+
+                var adjustmentValue = match.Groups[2].Value;
+                adjustment = string.IsNullOrEmpty(adjustmentValue) ? 0 : int.Parse(adjustmentValue);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error validating business day indicator {schedule}: {ex.Message}");
+            }
+        }
+        public static bool IsValidMarketPlace(string marketPlace)
+        {
+            try
+            {
+                if (marketPlace == "DEFAULT" || CalendarProviderPlugin.Current.GetXOneCalendarForPlaces(new[] { marketPlace }) != null)
+                {
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error validating marketPlace {marketPlace}: {ex.Message}");
+            }
+        }
+
+        public static bool IsHoliday(XOneDate date, string marketPlace)
+        {
+            try
+            {
+                var calendar = new Calendar(marketPlace);
+
+                if (IsWeekEnd(date))
+                {
+                    return false;
+                }
+
+                return !calendar.IsBusinessDay(date);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error checking if {date} is a holiday for {marketPlace}: {ex.Message}");
+            }
+        }
+        private static XOneDate GetIndicator(XOneDate runDate, string marketPlace, string baseIndicator, int adjustment)
+        {
+            XOneDate calculatedDate = runDate;
+
+            switch (baseIndicator.ToUpper())
+            {
+                case "EOM":
+                    calculatedDate = GetLastBusinessDayOfMonth(runDate, marketPlace);
+                    break;
+
+                case "SOM":
+                    calculatedDate = GetFirstBusinessDayOfMonth(runDate, marketPlace);
+                    break;
+
+            }
+
+            if (adjustment != 0)
+            {
+                calculatedDate = AdjustBusinessDays(calculatedDate, marketPlace, adjustment);
+            }
+
+            return calculatedDate;
+        }
+    }
+}
