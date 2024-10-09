@@ -293,9 +293,10 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
             string message;
             var runDate = new XOneDate(year, month, day); // Test date
 
+            // Mock calendar functionality as needed (if any)
             if (marketPlace == "NYC")
             {
-                _mockCalendar.Setup(c => c.LastBusinessDayOfMonth(It.IsAny<XOneDate>())).Returns(runDate);
+                // Setup any required behavior for valid marketPlace, or leave empty if unnecessary
             }
 
             // Act
@@ -305,4 +306,3 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
             Assert.AreEqual(expectedResult, result);
             Assert.AreEqual(expectedMessage, message);
         }
-    }
