@@ -274,3 +274,35 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
             Assert.IsTrue(isMatching);             // Assert matching result
             Assert.IsEmpty(message);               // Assert no error message
         }
+
+
+
+[Test]
+        [TestCase("NYC", "EOM", 2024, 10, 9, true, "")] // Valid case
+        [TestCase("", "", 2024, 10, 9, true, "")] // Empty marketplace and schedule
+        [TestCase("InvalidMarketPlace", "EOM", 2024, 10, 9, false, "Invalid Market Place InvalidMarketPlace")] // Invalid market place
+        [TestCase("NYC", "InvalidSchedule", 2024, 10, 9, false, "Invalid Schedule InvalidSchedule")] // Invalid schedule
+        public void IsMatching_ParameterizedTests(string marketPlace, string schedule, int year, int month, int day, bool expectedResult, string expectedMessage)
+        {
+            // Arrange
+            var parameters = new Dictionary<string, string>
+            {
+                { "MarketPlace", marketPlace },
+                { "BusinessDay", schedule }
+            };
+            string message;
+            var runDate = new XOneDate(year, month, day); // Test date
+
+            if (marketPlace == "NYC")
+            {
+                _mockCalendar.Setup(c => c.LastBusinessDayOfMonth(It.IsAny<XOneDate>())).Returns(runDate);
+            }
+
+            // Act
+            var result = ScheduleHelper.IsMatching(parameters, runDate, out message);
+
+            // Assert
+            Assert.AreEqual(expectedResult, result);
+            Assert.AreEqual(expectedMessage, message);
+        }
+    }
