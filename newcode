@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using Sgcib.TOne.StaticData;
 using Sgcib.TOne.Util;
 
 namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
@@ -11,6 +10,7 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
         private readonly string _thisName;
         private const string MarketPlaceParam = "MarketPlace";
         private const string BusinessDayParam = "BusinessDay";
+        private const string DefaultMarketPlace = "DEFAULT";
 
         private const string ValidDayIndicators = "EOM|SOM|SOW|EOW";
 
@@ -34,7 +34,7 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
                 {
                     return true;
                 }
-                if (!IsValidMarketPlace(marketPlace))
+                if (!IsValidMarketPlace(marketPlace, out var calendar))
                 {
                     message = $"Invalid Market Place {marketPlace}";
                     return false;
@@ -44,7 +44,8 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
                     message = $"Invalid Schedule {schedule}";
                     return false;
                 }
-                calculatedDate = GetIndicator(runDate, marketPlace, baseIndicator, adjustment);
+
+                calculatedDate = GetCalculatedDate(runDate, calendar, baseIndicator, adjustment);
             }
             catch (Exception ex)
             {
@@ -54,61 +55,67 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
             return runDate == calculatedDate;
         }
 
-        public static XOneDate GetLastBusinessDayOfMonth(XOneDate date, string marketPlace)
+        public static XOneDate GetLastBusinessDayOfMonth(XOneDate date, IXOneCalendar calendar)
         {
-            var lastDayOfMonth = new XOneDate(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month));
-            if (marketPlace == "DEFAULT")
+            if (calendar is null)
             {
-                while (IsWeekEnd(lastDayOfMonth))
+                var lastDayOfMonth = new XOneDate(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month));
+
+                while (IsHoliday(lastDayOfMonth))
                 {
                     lastDayOfMonth = lastDayOfMonth.AddDays(-1);
                 }
                 return lastDayOfMonth;
             }
-            IXOneCalendar calendar = new Calendar(new[] { marketPlace });
-            while (!calendar.IsBusinessDay(lastDayOfMonth) || IsHoliday(lastDayOfMonth, marketPlace))
+            else
             {
-                lastDayOfMonth = lastDayOfMonth.AddDays(-1);
+                return date.LastBusinessDayOfMonth(calendar);
             }
-            return lastDayOfMonth;
+
         }
 
-        public static XOneDate GetFirstBusinessDayOfMonth(XOneDate date, string marketPlace)
+        public static XOneDate GetFirstBusinessDayOfMonth(XOneDate date, IXOneCalendar calendar)
         {
-            XOneDate firstDayOfMonth = new XOneDate(date.Year, date.Month, 1);
-            if (marketPlace == "DEFAULT")
+            var firstDayOfMonth = new XOneDate(date.Year, date.Month, 1);
+            if (calendar is null)
             {
-                while (IsWeekEnd(firstDayOfMonth))
+                while (IsHoliday(firstDayOfMonth))
                 {
                     firstDayOfMonth = firstDayOfMonth.AddDays(1);
                 }
                 return firstDayOfMonth;
             }
-            IXOneCalendar calendar = new Calendar(new[] { marketPlace });
-            while (!calendar.IsBusinessDay(firstDayOfMonth) || IsHoliday(firstDayOfMonth, marketPlace))
+            else
             {
-                firstDayOfMonth = firstDayOfMonth.AddDays(1);
+                firstDayOfMonth.AdjustToBusinessDay(calendar, Analytics.Real.Dates.BusinessDayConventionEnum.FOLLOWING);
             }
             return firstDayOfMonth;
 
         }
 
-        private static XOneDate AdjustBusinessDays(XOneDate date, string marketPlace, int adjustment)
+        private static XOneDate AdjustBusinessDays(XOneDate date, IXOneCalendar calendar, int adjustment)
         {
             try
             {
-                while (adjustment != 0)
+                if (calendar is null)
                 {
-                    if (adjustment > 0)
+                    while (adjustment != 0)
                     {
-                        date = date.AddDays(1);
-                        if (IsBusinessDay(date, marketPlace) && !IsHoliday(date, marketPlace)) adjustment--;
+                        if (adjustment > 0)
+                        {
+                            date = date.AddDays(1);
+                            if (!IsHoliday(date)) adjustment--;
+                        }
+                        else
+                        {
+                            date = date.AddDays(-1);
+                            if (!IsHoliday(date)) adjustment++;
+                        }
                     }
-                    else
-                    {
-                        date = date.AddDays(-1);
-                        if (IsBusinessDay(date, marketPlace) && !IsHoliday(date, marketPlace)) adjustment++;
-                    }
+                }
+                else
+                {
+                    date = date.AddBusinessDays(adjustment, calendar);
                 }
                 return date;
             }
@@ -117,19 +124,7 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
                 throw new Exception($"Error adjusting business days: {ex.Message}");
             }
         }
-        public static bool IsBusinessDay(XOneDate date, string marketPlace)
-        {
-            try
-            {
-                var calendar = new Sgcib.TOne.StaticData.Calendar(new[] { marketPlace });
-                return calendar.IsBusinessDay(date);
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Error checking if {date} is a business day for {marketPlace}: {ex.Message}");
-            }
-        }
-        public static bool IsWeekEnd(XOneDate date)
+        public static bool IsHoliday(XOneDate date)
         {
             return date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
         }
@@ -158,11 +153,12 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
                 throw new Exception($"Error validating business day indicator {schedule}: {ex.Message}");
             }
         }
-        public static bool IsValidMarketPlace(string marketPlace)
+        public static bool IsValidMarketPlace(string marketPlace, out IXOneCalendar calendar)
         {
             try
             {
-                if (marketPlace == "DEFAULT" || CalendarProviderPlugin.Current.GetXOneCalendarForPlaces(new[] { marketPlace }) != null)
+                calendar = CalendarProviderPlugin.Current.GetXOneCalendarForPlaces(new[] { marketPlace });
+                if (marketPlace == DefaultMarketPlace || calendar != null)
                 {
                     return true;
                 }
@@ -173,44 +169,25 @@ namespace Sgcib.TOne.Products.OnewayMonitoring.Scheduler
                 throw new Exception($"Error validating marketPlace {marketPlace}: {ex.Message}");
             }
         }
-
-        public static bool IsHoliday(XOneDate date, string marketPlace)
-        {
-            try
-            {
-                var calendar = new Calendar(marketPlace);
-
-                if (IsWeekEnd(date))
-                {
-                    return false;
-                }
-
-                return !calendar.IsBusinessDay(date);
-            }
-            catch (Exception ex)
-            {
-                throw new Exception($"Error checking if {date} is a holiday for {marketPlace}: {ex.Message}");
-            }
-        }
-        private static XOneDate GetIndicator(XOneDate runDate, string marketPlace, string baseIndicator, int adjustment)
+        private static XOneDate GetCalculatedDate(XOneDate runDate, IXOneCalendar calendar, string baseIndicator, int adjustment)
         {
             XOneDate calculatedDate = runDate;
 
             switch (baseIndicator.ToUpper())
             {
                 case "EOM":
-                    calculatedDate = GetLastBusinessDayOfMonth(runDate, marketPlace);
+                    calculatedDate = GetLastBusinessDayOfMonth(runDate, calendar);
                     break;
 
                 case "SOM":
-                    calculatedDate = GetFirstBusinessDayOfMonth(runDate, marketPlace);
+                    calculatedDate = GetFirstBusinessDayOfMonth(runDate, calendar);
                     break;
 
             }
 
             if (adjustment != 0)
             {
-                calculatedDate = AdjustBusinessDays(calculatedDate, marketPlace, adjustment);
+                calculatedDate = AdjustBusinessDays(calculatedDate, calendar, adjustment);
             }
 
             return calculatedDate;
