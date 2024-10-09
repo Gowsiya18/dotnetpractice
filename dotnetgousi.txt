@@ -408,5 +408,32 @@ public static XOneDate LastBusinessDayOfMonth(XOneDate date, string marketPlace)
 
             return !calendar.IsBusinessDay(date);
         }
+
+        private static XOneDate GetIndicator(XOneDate runDate, string marketPlace, string baseIndicator, int adjustment)
+{
+    XOneDate calculatedDate = runDate;
+
+    switch (baseIndicator.ToUpper())
+    {
+        case "EOM":
+            calculatedDate = LastBusinessDayOfMonth(runDate, marketPlace);
+            break;
+
+        case "SOM":
+            calculatedDate = FirstBusinessDayOfMonth(runDate, marketPlace);
+            break;
+
+        // Add other cases here if needed for EOW, SOW, etc.
+    }
+
+    // Adjust business days if necessary
+    if (adjustment != 0)
+    {
+        calculatedDate = AdjustBusinessDays(calculatedDate, marketPlace, adjustment);
+    }
+
+    return calculatedDate;
+}
+
     }
 }
