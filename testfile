@@ -233,7 +233,22 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
 
 
 
-[SetUp]
+using Moq;
+using NUnit.Framework;
+using Sgcib.TOne.Products.OnewayMonitoring.Scheduler;
+using Sgcib.TOne.StaticData;
+using System;
+using System.Collections.Generic;
+
+namespace Sgcib.TOne.Products.OnewayMonitoring.Tests
+{
+    [TestFixture]
+    public class ScheduleHelperTests
+    {
+        private Mock<IXOneCalendar> _mockCalendar;
+        private Mock<ICalendarProviderPlugin> _mockCalendarProviderPlugin;
+
+        [SetUp]
         public void Setup()
         {
             _mockCalendar = new Mock<IXOneCalendar>();
@@ -244,7 +259,7 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
                 .Setup(x => x.GetXOneCalendarForPlaces(It.IsAny<string[]>()))
                 .Returns(_mockCalendar.Object);
 
-            // Setup mock Calendar behavior
+            // Setup mock Calendar behavior: all dates are business days
             _mockCalendar
                 .Setup(x => x.IsBusinessDay(It.IsAny<XOneDate>()))
                 .Returns(true); // Mock all dates as business days for simplicity
@@ -254,6 +269,8 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
         [TestCase("DEFAULT", "EOM", 2024, 10, 31)] // End of Month
         [TestCase("DEFAULT", "SOM", 2024, 10, 1)]  // Start of Month
         [TestCase("DEFAULT", "EOM+3", 2024, 11, 3)] // EOM + 3 days
+        [TestCase("DEFAULT", "EOM-2", 2024, 10, 29)] // EOM - 2 days
+        [TestCase("DEFAULT", "SOM+2", 2024, 10, 3)]  // SOM + 2 days
         public void IsMatching_ValidSchedule_ReturnsExpectedDate(string marketPlace, string schedule, int expectedYear, int expectedMonth, int expectedDay)
         {
             // Arrange
@@ -275,42 +292,109 @@ namespace Sgcib.TOne.Tests.OnewayMonitoring.Scheduler
             Assert.IsEmpty(message);               // Assert no error message
         }
 
-[TestCase("DEFAULT", "EOM", "2024-10-31", true, "")]
-        [TestCase("DEFAULT", "SOM", "2024-10-01", true, "")]
-        [TestCase("DEFAULT", "EOM-1", "2024-10-30", true, "")]
-        [TestCase("DEFAULT", "SOM+2", "2024-10-03", true, "")]
-        [TestCase("InvalidMarket", "EOM", "2024-10-31", false, "Invalid Market Place InvalidMarket")]
-        [TestCase("DEFAULT", "InvalidSchedule", "2024-10-31", false, "Invalid Schedule InvalidSchedule")]
-        public void IsMatching_ParameterizedTests(string marketPlace, string businessDayParam, string runDateString, bool expectedResult, string expectedMessage)
+        [Test]
+        [TestCase("EOM", 2024, 10, 31)]
+        [TestCase("SOM", 2024, 10, 1)]
+        [TestCase("EOM+2", 2024, 11, 2)]
+        [TestCase("SOM-1", 2024, 9, 30)]
+        public void GetCalculatedDate_ValidSchedule_ReturnsExpectedDate(string baseIndicator, int expectedYear, int expectedMonth, int expectedDay)
         {
             // Arrange
-            var runDate = new XOneDate(DateTime.Parse(runDateString));
-            var parameters = new Dictionary<string, string>
-            {
-                { "MarketPlace", marketPlace },
-                { "BusinessDay", businessDayParam }
-            };
-
-            string actualMessage;
-
-            // Mock the behavior for the calendar
-            _mockCalendar.Setup(c => c.AddBusinessDays(It.IsAny<int>(), It.IsAny<XOneDate>())).Returns<XOneDate, int>((date, adjustment) => date.AddDays(adjustment));
-
-            // Mock valid market place check
-            Mock.Get(CalendarProviderPlugin.Current)
-                .Setup(p => p.GetXOneCalendarForPlaces(It.Is<string[]>(m => m[0] == "DEFAULT")))
-                .Returns(_mockCalendar.Object);
-
-            Mock.Get(CalendarProviderPlugin.Current)
-                .Setup(p => p.GetXOneCalendarForPlaces(It.Is<string[]>(m => m[0] == "InvalidMarket")))
-                .Returns((IXOneCalendar)null);
+            var runDate = new XOneDate(2024, 10, 15); // Arbitrary run date
+            var expectedDate = new XOneDate(expectedYear, expectedMonth, expectedDay);
 
             // Act
-            var result = ScheduleHelper.IsMatching(parameters, runDate, out actualMessage);
+            var result = ScheduleHelper.GetCalculatedDate(runDate, _mockCalendar.Object, baseIndicator, 0);
 
             // Assert
-            Assert.AreEqual(expectedResult, result);
-            Assert.AreEqual(expectedMessage, actualMessage);
+            Assert.AreEqual(expectedDate, result);
         }
 
+        [Test]
+        [TestCase("DEFAULT", true)]  // Valid market place
+        [TestCase("INVALID", false)] // Invalid market place
+        public void IsValidMarketPlace_ValidatesMarketPlaceCorrectly(string marketPlace, bool isValid)
+        {
+            // Arrange
+            _mockCalendarProviderPlugin
+                .Setup(x => x.GetXOneCalendarForPlaces(It.IsAny<string[]>()))
+                .Returns(isValid ? _mockCalendar.Object : null);
 
+            // Act
+            var result = ScheduleHelper.IsValidMarketPlace(marketPlace, out IXOneCalendar calendar);
+
+            // Assert
+            Assert.AreEqual(isValid, result);
+        }
+
+        [Test]
+        [TestCase("EOM", true, "EOM", 0)]  // Valid schedule EOM
+        [TestCase("SOM", true, "SOM", 0)]  // Valid schedule SOM
+        [TestCase("EOM+3", true, "EOM", 3)] // Valid EOM+3
+        [TestCase("EOM-2", true, "EOM", -2)] // Valid EOM-2
+        [TestCase("INVALID", false, null, 0)] // Invalid schedule
+        public void IsValidBusinessDayIndicator_ValidatesBusinessDayIndicator(string schedule, bool isValid, string expectedBaseIndicator, int expectedAdjustment)
+        {
+            // Act
+            var result = ScheduleHelper.IsValidBusinessDayIndicator(schedule, out string baseIndicator, out int adjustment);
+
+            // Assert
+            Assert.AreEqual(isValid, result);
+            if (isValid)
+            {
+                Assert.AreEqual(expectedBaseIndicator, baseIndicator);
+                Assert.AreEqual(expectedAdjustment, adjustment);
+            }
+        }
+
+        [Test]
+        [TestCase(2024, 10, 31)] // October 2024
+        [TestCase(2023, 2, 28)]  // February (non-leap year)
+        [TestCase(2024, 2, 29)]  // February (leap year)
+        public void GetLastBusinessDayOfMonth_ReturnsCorrectDate(int year, int month, int expectedDay)
+        {
+            // Arrange
+            var date = new XOneDate(year, month, 15); // Arbitrary date in the same month
+            var expectedLastBusinessDay = new XOneDate(year, month, expectedDay);
+
+            // Act
+            var result = ScheduleHelper.GetLastBusinessDayOfMonth(date, _mockCalendar.Object);
+
+            // Assert
+            Assert.AreEqual(expectedLastBusinessDay, result);
+        }
+
+        [Test]
+        [TestCase(2024, 10, 1)] // October 2024
+        [TestCase(2023, 2, 1)]  // February (non-leap year)
+        [TestCase(2024, 2, 1)]  // February (leap year)
+        public void GetFirstBusinessDayOfMonth_ReturnsCorrectDate(int year, int month, int expectedDay)
+        {
+            // Arrange
+            var date = new XOneDate(year, month, 15); // Arbitrary date in the same month
+            var expectedFirstBusinessDay = new XOneDate(year, month, expectedDay);
+
+            // Act
+            var result = ScheduleHelper.GetFirstBusinessDayOfMonth(date, _mockCalendar.Object);
+
+            // Assert
+            Assert.AreEqual(expectedFirstBusinessDay, result);
+        }
+
+        [Test]
+        [TestCase(2024, 10, 15, true)]  // Weekday
+        [TestCase(2024, 10, 14, true)]  // Weekday
+        [TestCase(2024, 10, 13, false)] // Sunday (Holiday)
+        public void IsHoliday_ChecksCorrectly(int year, int month, int day, bool isBusinessDay)
+        {
+            // Arrange
+            var date = new XOneDate(year, month, day);
+
+            // Act
+            var result = ScheduleHelper.IsHoliday(date);
+
+            // Assert
+            Assert.AreEqual(!isBusinessDay, result); // If it's a business day, it's not a holiday
+        }
+    }
+}
